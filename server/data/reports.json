@@ -1,0 +1,24 @@
+[
+  {
+    "id": "405bc77e-9de3-4207-8f83-1a1d016645a7",
+    "targetId": "1",
+    "targetType": "secret",
+    "reason": "inappropriate",
+    "description": "????",
+    "status": "hidden",
+    "createdAt": "2026-06-15T22:06:23.988Z",
+    "handledAt": "2026-06-15T22:09:29.185Z",
+    "handleResult": "已隐藏"
+  },
+  {
+    "id": "fb54172d-317d-4027-978a-910fdb36ce77",
+    "targetId": "5",
+    "targetType": "secret",
+    "reason": "inappropriate",
+    "description": "",
+    "status": "pending",
+    "createdAt": "2026-06-15T22:07:47.935Z",
+    "handledAt": null,
+    "handleResult": null
+  }
+]
