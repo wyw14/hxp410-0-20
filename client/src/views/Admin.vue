@@ -46,14 +46,14 @@
               <button
                 v-if="item.hidden"
                 class="btn btn-success btn-sm"
-                @click="restoreSecret(item.id)"
+                @click="openActionModal('restore', item.id)"
               >
                 恢复
               </button>
               <button
                 v-else
                 class="btn btn-danger btn-sm"
-                @click="hideSecret(item.id)"
+                @click="openActionModal('hide', item.id)"
               >
                 隐藏
               </button>
@@ -83,6 +83,7 @@
                   v-for="report in item.reports"
                   :key="report.id"
                   class="report-record"
+                  :class="{ 'record-process': report.reason === 'process' || report.reason === 'restore' }"
                 >
                   <div class="record-header">
                     <span
@@ -103,7 +104,7 @@
                   </p>
                   <div class="record-footer">
                     <span class="record-time">
-                      举报时间：{{ formatDate(report.createdAt) }}
+                      {{ getTimeLabel(report) }}
                     </span>
                     <span v-if="report.handledAt" class="record-handled">
                       处理时间：{{ formatDate(report.handledAt) }}
@@ -113,7 +114,7 @@
                   <div v-if="report.status === 'pending'" class="record-actions">
                     <button
                       class="btn btn-secondary btn-xs"
-                      @click="ignoreReport(report.id)"
+                      @click="openActionModal('ignore', report.id)"
                     >
                       忽略此举报
                     </button>
@@ -131,6 +132,47 @@
         </button>
       </div>
     </div>
+
+    <transition name="fade">
+      <div v-if="showActionModal" class="modal-overlay" @click.self="closeActionModal">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h3>{{ getModalTitle() }}</h3>
+            <button class="close-btn" @click="closeActionModal">&times;</button>
+          </div>
+          <div class="modal-body">
+            <p class="modal-tip">{{ getModalTip() }}</p>
+            <div class="form-group">
+              <label>处理备注（可选）</label>
+              <textarea
+                v-model="actionRemark"
+                class="action-textarea"
+                rows="3"
+                placeholder="请输入处理备注..."
+                maxlength="200"
+              ></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" @click="closeActionModal">
+              取消
+            </button>
+            <button
+              class="btn"
+              :class="getConfirmBtnClass()"
+              @click="confirmAction"
+              :disabled="submittingAction"
+            >
+              <span v-if="submittingAction">
+                <span class="btn-spinner"></span>
+                处理中...
+              </span>
+              <span v-else>{{ getConfirmBtnText() }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -140,6 +182,12 @@ import { ref, onMounted } from 'vue'
 const loading = ref(true)
 const items = ref([])
 const expandedId = ref(null)
+
+const showActionModal = ref(false)
+const actionType = ref('')
+const actionTargetId = ref('')
+const actionRemark = ref('')
+const submittingAction = ref(false)
 
 async function fetchReports() {
   loading.value = true
@@ -172,9 +220,17 @@ function getStatusLabel(status) {
   const map = {
     pending: '待处理',
     ignored: '已忽略',
-    hidden: '已隐藏'
+    hidden: '已隐藏',
+    restored: '已恢复'
   }
   return map[status] || status
+}
+
+function getTimeLabel(report) {
+  if (report.reason === 'process' || report.reason === 'restore') {
+    return `操作时间：${formatDate(report.createdAt)}`
+  }
+  return `举报时间：${formatDate(report.createdAt)}`
 }
 
 function toggleExpand(id) {
@@ -185,69 +241,87 @@ function toggleExpand(id) {
   }
 }
 
-async function hideSecret(id) {
-  if (!confirm('确定要隐藏此秘密吗？隐藏后将不再在首页显示。')) return
-
-  try {
-    const response = await fetch(`/api/admin/secrets/${id}/hide`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    })
-    const data = await response.json()
-    if (data.success) {
-      fetchReports()
-    } else {
-      alert(data.error || '操作失败')
-    }
-  } catch (error) {
-    console.error('隐藏失败:', error)
-    alert('操作失败，请稍后重试')
-  }
+function openActionModal(type, targetId) {
+  actionType.value = type
+  actionTargetId.value = targetId
+  actionRemark.value = ''
+  showActionModal.value = true
 }
 
-async function restoreSecret(id) {
-  if (!confirm('确定要恢复此秘密吗？恢复后将重新在首页显示。')) return
-
-  try {
-    const response = await fetch(`/api/admin/secrets/${id}/restore`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    })
-    const data = await response.json()
-    if (data.success) {
-      fetchReports()
-    } else {
-      alert(data.error || '操作失败')
-    }
-  } catch (error) {
-    console.error('恢复失败:', error)
-    alert('操作失败，请稍后重试')
-  }
+function closeActionModal() {
+  showActionModal.value = false
 }
 
-async function ignoreReport(reportId) {
-  if (!confirm('确定要忽略此举报吗？')) return
+function getModalTitle() {
+  const titles = {
+    hide: '隐藏此内容',
+    restore: '恢复此内容',
+    ignore: '忽略此举报'
+  }
+  return titles[actionType.value] || '操作确认'
+}
 
+function getModalTip() {
+  const tips = {
+    hide: '确定要隐藏此秘密吗？隐藏后将不再在首页显示。',
+    restore: '确定要恢复此秘密吗？恢复后将重新在首页显示。',
+    ignore: '确定要忽略此举报吗？此操作不会对内容产生影响。'
+  }
+  return tips[actionType.value] || '确定执行此操作吗？'
+}
+
+function getConfirmBtnClass() {
+  const classes = {
+    hide: 'btn-danger',
+    restore: 'btn-success',
+    ignore: 'btn-primary'
+  }
+  return classes[actionType.value] || 'btn-primary'
+}
+
+function getConfirmBtnText() {
+  const texts = {
+    hide: '确认隐藏',
+    restore: '确认恢复',
+    ignore: '确认忽略'
+  }
+  return texts[actionType.value] || '确认'
+}
+
+async function confirmAction() {
+  submittingAction.value = true
   try {
-    const response = await fetch(`/api/admin/reports/${reportId}/ignore`, {
+    let url = ''
+    if (actionType.value === 'hide') {
+      url = `/api/admin/secrets/${actionTargetId.value}/hide`
+    } else if (actionType.value === 'restore') {
+      url = `/api/admin/secrets/${actionTargetId.value}/restore`
+    } else if (actionType.value === 'ignore') {
+      url = `/api/admin/reports/${actionTargetId.value}/ignore`
+    }
+
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
-      }
+      },
+      body: JSON.stringify({
+        remark: actionRemark.value.trim()
+      })
     })
+
     const data = await response.json()
     if (data.success) {
+      closeActionModal()
       fetchReports()
     } else {
       alert(data.error || '操作失败')
     }
   } catch (error) {
-    console.error('忽略失败:', error)
+    console.error('操作失败:', error)
     alert('操作失败，请稍后重试')
+  } finally {
+    submittingAction.value = false
   }
 }
 
@@ -490,6 +564,11 @@ onMounted(() => {
   padding: 12px 14px;
 }
 
+.record-process {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
 .record-header {
   display: flex;
   justify-content: space-between;
@@ -531,6 +610,16 @@ onMounted(() => {
   color: #3730a3;
 }
 
+.reason-process {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.reason-restore {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
 .status-tag {
   padding: 3px 10px;
   border-radius: 10px;
@@ -550,6 +639,11 @@ onMounted(() => {
 .status-hidden {
   background: #d1fae5;
   color: #065f46;
+}
+
+.status-restored {
+  background: #bfdbfe;
+  color: #1e40af;
 }
 
 .report-desc {
@@ -583,13 +677,157 @@ onMounted(() => {
 .slide-enter-active,
 .slide-leave-active {
   transition: all 0.3s ease;
-  max-height: 1000px;
+  max-height: 2000px;
   overflow: hidden;
 }
 
 .slide-enter-from,
 .slide-leave-to {
   max-height: 0;
+  opacity: 0;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 20px;
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: modalSlideUp 0.3s ease;
+}
+
+@keyframes modalSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid #eee;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 20px;
+  color: #333;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 28px;
+  color: #999;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+}
+
+.close-btn:hover {
+  background: #f0f0f0;
+  color: #666;
+}
+
+.modal-body {
+  padding: 24px;
+}
+
+.modal-tip {
+  color: #333;
+  font-size: 15px;
+  margin-bottom: 20px;
+  line-height: 1.6;
+}
+
+.form-group {
+  margin-bottom: 0;
+}
+
+.form-group label {
+  display: block;
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.action-textarea {
+  width: 100%;
+  padding: 12px;
+  border: 2px solid #e5e7eb;
+  border-radius: 12px;
+  font-size: 14px;
+  font-family: inherit;
+  resize: none;
+  transition: all 0.3s ease;
+  line-height: 1.6;
+  background: #fafafa;
+  box-sizing: border-box;
+}
+
+.action-textarea:focus {
+  outline: none;
+  border-color: #667eea;
+  background: white;
+  box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 20px 24px;
+  border-top: 1px solid #eee;
+}
+
+.btn-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
   opacity: 0;
 }
 </style>

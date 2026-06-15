@@ -57,7 +57,9 @@ const REPORT_REASON_LABELS = {
   inappropriate: '不当内容',
   harassment: '骚扰霸凌',
   violence: '暴力内容',
-  other: '其他原因'
+  other: '其他原因',
+  process: '处理记录',
+  restore: '恢复记录'
 };
 
 app.post('/api/secrets', (req, res) => {
@@ -239,6 +241,7 @@ app.get('/api/admin/reports', (req, res) => {
 app.post('/api/admin/secrets/:id/hide', (req, res) => {
   try {
     const { id } = req.params;
+    const { remark } = req.body;
     const secrets = readSecrets();
     const reports = readReports();
 
@@ -251,13 +254,31 @@ app.post('/api/admin/secrets/:id/hide', (req, res) => {
     writeSecrets(secrets);
 
     const now = new Date().toISOString();
+    const handleResult = remark ? `已隐藏：${remark}` : '已隐藏';
     reports.forEach(r => {
       if (r.targetId === id && r.status === 'pending') {
         r.status = 'hidden';
         r.handledAt = now;
-        r.handleResult = '已隐藏';
+        r.handleResult = handleResult;
       }
     });
+
+    const targetReports = reports.filter(r => r.targetId === id && r.status === 'hidden');
+    if (targetReports.length === 0) {
+      const newProcessRecord = {
+        id: uuidv4(),
+        targetId: id,
+        targetType: 'secret',
+        reason: 'process',
+        description: remark || '',
+        status: 'hidden',
+        createdAt: now,
+        handledAt: now,
+        handleResult: handleResult
+      };
+      reports.push(newProcessRecord);
+    }
+
     writeReports(reports);
 
     res.json({
@@ -273,7 +294,9 @@ app.post('/api/admin/secrets/:id/hide', (req, res) => {
 app.post('/api/admin/secrets/:id/restore', (req, res) => {
   try {
     const { id } = req.params;
+    const { remark } = req.body;
     const secrets = readSecrets();
+    const reports = readReports();
 
     const secretIndex = secrets.findIndex(s => s.id === id);
     if (secretIndex === -1) {
@@ -282,6 +305,23 @@ app.post('/api/admin/secrets/:id/restore', (req, res) => {
 
     secrets[secretIndex].hidden = false;
     writeSecrets(secrets);
+
+    const now = new Date().toISOString();
+    const handleResult = remark ? `已恢复：${remark}` : '已恢复';
+
+    const restoreRecord = {
+      id: uuidv4(),
+      targetId: id,
+      targetType: 'secret',
+      reason: 'restore',
+      description: remark || '',
+      status: 'restored',
+      createdAt: now,
+      handledAt: now,
+      handleResult: handleResult
+    };
+    reports.push(restoreRecord);
+    writeReports(reports);
 
     res.json({
       success: true,
@@ -296,6 +336,7 @@ app.post('/api/admin/secrets/:id/restore', (req, res) => {
 app.post('/api/admin/reports/:id/ignore', (req, res) => {
   try {
     const { id } = req.params;
+    const { remark } = req.body;
     const reports = readReports();
 
     const reportIndex = reports.findIndex(r => r.id === id);
@@ -303,9 +344,10 @@ app.post('/api/admin/reports/:id/ignore', (req, res) => {
       return res.status(404).json({ error: '举报不存在' });
     }
 
+    const handleResult = remark ? `已忽略：${remark}` : '已忽略';
     reports[reportIndex].status = 'ignored';
     reports[reportIndex].handledAt = new Date().toISOString();
-    reports[reportIndex].handleResult = '已忽略';
+    reports[reportIndex].handleResult = handleResult;
     writeReports(reports);
 
     res.json({
